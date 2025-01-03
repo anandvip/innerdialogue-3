@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inner Dialogue Journal</title>
+    <!-- Original CSS remains unchanged -->
     <style>
         /* Base Styles */
         body {
@@ -373,7 +374,7 @@
             orderBy 
         } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-        // Firebase Configuration
+        // Firebase Configuration - Preserved from original
         const firebaseConfig = {
             apiKey: "AIzaSyB00L-6PsCK5LMAVbUPXgNNF0BywlZKqwk",
             authDomain: "weekly-journal-9df9c.firebaseapp.com",
@@ -388,12 +389,160 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // AI Provider API Keys
+        // AI Provider API Keys - Preserved from original
         const API_KEYS = {
             openai: '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',
             mistral: 'ic8ExdQksCSXrL4qo0sm9bdkwtKmDUCm',
             gemini: 'AIzaSyBPO0PQ4PltzLQOSGJOxbqnyt-8xAG7ZpA'
         };
+
+        // Improved AI Prompt Generator Class
+        class AIPromptGenerator {
+            static getEndpoint(provider) {
+                const endpoints = {
+                    openai: 'https://api.openai.com/v1/chat/completions',
+                    mistral: 'https://api.mistral.ai/v1/chat/completions',
+                    gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'
+                };
+                return endpoints[provider];
+            }
+
+            static getHeaders(provider) {
+                const headers = {
+                    'Content-Type': 'application/json',
+                };
+
+                switch (provider) {
+                    case 'openai':
+                        return {
+                            ...headers,
+                            'Authorization': `Bearer ${API_KEYS[provider]}`,
+                            'OpenAI-Beta': 'assistants=v1'
+                        };
+                    case 'mistral':
+                        return {
+                            ...headers,
+                            'Authorization': `Bearer ${API_KEYS[provider]}`,
+                        };
+                    case 'gemini':
+                        return headers;
+                    default:
+                        return headers;
+                }
+            }
+
+            static getRequestBody(keywords, provider) {
+                const basePrompt = `Create a thoughtful journaling prompt about ${keywords}. Focus on personal growth, self-reflection, and emotional awareness. The prompt should be engaging and open-ended.`;
+
+                switch (provider) {
+                    case 'openai':
+                        return {
+                            model: 'gpt-3.5-turbo',
+                            messages: [{
+                                role: 'user',
+                                content: basePrompt
+                            }],
+                            max_tokens: 150,
+                            temperature: 0.7,
+                            top_p: 1,
+                            frequency_penalty: 0,
+                            presence_penalty: 0
+                        };
+                    
+                    case 'mistral':
+                        return {
+                            model: 'mistral-tiny',
+                            messages: [{
+                                role: 'user',
+                                content: basePrompt
+                            }],
+                            max_tokens: 150,
+                            temperature: 0.7,
+                            top_p: 1
+                        };
+                    
+                    case 'gemini':
+                        return {
+                            contents: [{
+                                parts: [{
+                                    text: basePrompt
+                                }]
+                            }],
+                            generationConfig: {
+                                temperature: 0.7,
+                                topK: 40,
+                                topP: 0.95,
+                                maxOutputTokens: 150,
+                            },
+                            safetySettings: [
+                                {
+                                    category: "HARM_CATEGORY_HARASSMENT",
+                                    threshold: "BLOCK_MEDIUM_AND_ABOVE"
+                                }
+                            ]
+                        };
+                    
+                    default:
+                        throw new Error('Unsupported AI provider');
+                }
+            }
+
+            static async generate(keywords, provider) {
+                const endpoint = this.getEndpoint(provider);
+                const headers = this.getHeaders(provider);
+                const requestBody = this.getRequestBody(keywords, provider);
+
+                // For Gemini, append API key to URL
+                const url = provider === 'gemini' 
+                    ? `${endpoint}?key=${API_KEYS[provider]}`
+                    : endpoint;
+
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify(requestBody)
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        console.error('AI API Error:', {
+                            status: response.status,
+                            statusText: response.statusText,
+                            errorData
+                        });
+                        throw new Error(`AI API request failed: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    return this.extractPrompt(data, provider);
+                } catch (error) {
+                    console.error('Error generating AI prompt:', error);
+                    throw new Error(`Failed to generate prompt: ${error.message}`);
+                }
+            }
+
+            static extractPrompt(data, provider) {
+                try {
+                    switch (provider) {
+                        case 'openai':
+                            return data.choices[0].message.content;
+                        
+                        case 'mistral':
+                            return data.choices[0].message.content;
+                        
+                        case 'gemini':
+                            return data.candidates[0].content.parts[0].text;
+                        
+                        default:
+                            throw new Error('Unsupported AI provider');
+                    }
+                } catch (error) {
+                    console.error('Error extracting prompt:', error);
+                    throw new Error('Failed to parse AI response');
+                }
+            }
+        }
 
         // DOM Elements
         const elements = {
@@ -448,18 +597,23 @@
                     userId: user.uid
                 };
 
-                if (editingId) {
-                    await setDoc(
-                        doc(db, "users", user.uid, "entries", editingId),
-                        entryData
-                    );
-                    return 'updated';
-                } else {
-                    await addDoc(
-                        collection(db, "users", user.uid, "entries"),
-                        entryData
-                    );
-                    return 'saved';
+                try {
+                    if (editingId) {
+                        await setDoc(
+                            doc(db, "users", user.uid, "entries", editingId),
+                            entryData
+                        );
+                        return 'updated';
+                    } else {
+                        await addDoc(
+                            collection(db, "users", user.uid, "entries"),
+                            entryData
+                        );
+                        return 'saved';
+                    }
+                } catch (error) {
+                    console.error('Error saving entry:', error);
+                    throw new Error('Failed to save entry');
                 }
             }
 
@@ -467,110 +621,37 @@
                 const user = auth.currentUser;
                 if (!user) throw new Error('User not authenticated');
                 
-                await deleteDoc(doc(db, "users", user.uid, "entries", entryId));
+                try {
+                    await deleteDoc(doc(db, "users", user.uid, "entries", entryId));
+                } catch (error) {
+                    console.error('Error deleting entry:', error);
+                    throw new Error('Failed to delete entry');
+                }
             }
 
             static async loadEntries() {
                 const user = auth.currentUser;
                 if (!user) throw new Error('User not authenticated');
 
-                const entriesQuery = query(
-                    collection(db, "users", user.uid, "entries"),
-                    orderBy("timestamp", "desc")
-                );
-
-                const querySnapshot = await getDocs(entriesQuery);
-                return querySnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                }));
-            }
-        }
-
-        // AI Prompt Generation System
-       class AIPromptGenerator {
-            static getEndpoint(provider) {
-                const endpoints = {
-                    openai: 'https://api.openai.com/v1/chat/completions',
-                    mistral: 'https://api.mistral.ai/v1/chat/completions',
-                    gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'
-                };
-                return endpoints[provider];
-            }
-
-           static getHeaders(provider) {
-                const headers = {
-                    'Content-Type': 'application/json',
-                };
-
-                if (provider === 'gemini') {
-                    return headers;
-                }
-
-                return {
-                    ...headers,
-                    'Authorization': `Bearer ${API_KEYS[provider]}`
-                };
-            }
-
-            static getPromptTemplate(keywords, provider) {
-                const templates = {
-                    openai: `Create a thoughtful journaling prompt about ${keywords}. Focus on personal growth, self-reflection, and emotional awareness. The prompt should be engaging and open-ended.`,
-                    mistral: `Generate an introspective writing prompt related to ${keywords}. Include elements that encourage deep personal reflection and emotional exploration.`,
-                    gemini: `Craft a journal prompt exploring themes of ${keywords}. Make it thought-provoking and designed to facilitate personal insight and emotional understanding.`
-                };
-                return templates[provider];
-            }
-
-            static async generate(keywords, provider) {
-                const endpoint = this.getEndpoint(provider);
-                const headers = this.getHeaders(provider);
-                const prompt = this.getPromptTemplate(keywords, provider);
-
                 try {
-                    const requestBody = provider === 'gemini' ?
-                     JSON.stringify({
-                         contents: [{
-                                parts: [{ text: prompt }]
-                            }]
-                        })
-                     : JSON.stringify({
-                            model: provider === 'openai' ? 'gpt-3.5-turbo' : undefined,
-                            messages: [{role: "user", content: prompt}],
-                            max_tokens: 150,
-                            temperature: 0.7
-                        });
+                    const entriesQuery = query(
+                        collection(db, "users", user.uid, "entries"),
+                        orderBy("timestamp", "desc")
+                    );
 
-
-                    const response = await fetch(endpoint, {
-                        method: 'POST',
-                        headers: headers,
-                        body: requestBody
-                    });
-
-                    if (!response.ok) {
-                        throw new Error('AI API request failed');
-                    }
-
-                    const data = await response.json();
-                    return this.extractPrompt(data, provider);
+                    const querySnapshot = await getDocs(entriesQuery);
+                    return querySnapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
                 } catch (error) {
-                    console.error('Error generating AI prompt:', error);
-                    throw new Error('Failed to generate prompt');
+                    console.error('Error loading entries:', error);
+                    throw new Error('Failed to load entries');
                 }
-            }
-
-            static extractPrompt(data, provider) {
-                const extractors = {
-                    openai: (d) => d.choices[0].message.content,
-                    mistral: (d) => d.choices[0].message.content,
-                    gemini: (d) => d.candidates[0].content.parts[0].text
-                };
-                return extractors[provider](data);
             }
         }
 
-        // UI Event Handlers
+        // UI Event Handler
         class UIHandler {
             static setupEventListeners() {
                 // Authentication handlers
@@ -641,7 +722,7 @@
                     elements.journal.saveButton.dataset.editingId = '';
                     elements.journal.saveButton.textContent = 'Save Entry';
                     
-                   await UIHandler.refreshEntries();
+                    await UIHandler.refreshEntries();
                 } catch (error) {
                     ToastSystem.show(error.message, 'error');
                 }
@@ -732,9 +813,9 @@
                         this.handleEntryDelete(entry.id);
                     });
 
-                     li.addEventListener('click', () => {
-                            elements.journal.text.value = entry.text;
-                        });
+                    li.addEventListener('click', () => {
+                        this.loadEntryForEditing(entry);
+                    });
 
                     elements.journal.entryList.appendChild(li);
                 });
@@ -744,7 +825,7 @@
                 elements.journal.text.value = entry.text;
                 elements.journal.saveButton.dataset.editingId = entry.id;
                 elements.journal.saveButton.textContent = 'Update Entry';
-                 elements.journal.text.focus();
+                elements.journal.text.focus();
             }
 
             static async handleEntryDelete(entryId) {
@@ -765,7 +846,7 @@
         // Initialize the application
         document.addEventListener('DOMContentLoaded', () => {
             UIHandler.setupEventListeners();
-             elements.journal.saveButton.disabled = true;
+            elements.journal.saveButton.disabled = true;
         });
     </script>
 </body>
